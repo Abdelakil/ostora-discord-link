@@ -214,4 +214,103 @@ public class CommandService
         player.SendChat($"{_config.CurrentValue.MessagePrefix}   DB Service Enabled: {_databaseService.IsEnabled}");
         player.SendChat($"{_config.CurrentValue.MessagePrefix}   Grant On Link: {_config.CurrentValue.Permissions.GrantOnLink}");
     }
+
+    [Command("grantperm")]
+    public void Command_GrantPerm(ICommandContext context)
+    {
+        if (!context.IsSentByPlayer) return;
+        
+        var player = context.Sender!;
+        var configPerm = _config.CurrentValue.Permissions.LinkedPermission;
+        
+        // Grant the permission
+        _core.Permission.AddPermission(player.SteamID, configPerm);
+        
+        player.SendChat($"{_config.CurrentValue.MessagePrefix} Manually granted permission '{configPerm}'");
+        
+        // Verify it was granted
+        var hasPermission = _core.Permission.PlayerHasPermission(player.SteamID, configPerm);
+        player.SendChat($"{_config.CurrentValue.MessagePrefix} Permission verification: {(hasPermission ? "✅ YES" : "❌ NO")}");
+        
+        _core.Logger.LogInformation("Manual permission grant for player {SteamId} - Permission '{Permission}': {HasPermission}", 
+            player.SteamID, configPerm, hasPermission);
+    }
+
+    [Command("syncperm")]
+    public void Command_SyncPerm(ICommandContext context)
+    {
+        if (!context.IsSentByPlayer) return;
+        
+        var player = context.Sender!;
+        
+        // Check if player is linked in database
+        var dbLink = _databaseService.GetLinkBySteamIdAsync(player.SteamID).Result;
+        if (dbLink != null)
+        {
+            var configPerm = _config.CurrentValue.Permissions.LinkedPermission;
+            
+            player.SendChat($"{_config.CurrentValue.MessagePrefix} Syncing permissions for Discord link...");
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ✅ {dbLink.DiscordUsername} ({dbLink.DiscordUserId})");
+            
+            // Grant the permission
+            var granted = _databaseService.GrantLinkedPermissionAsync(player.SteamID, configPerm).Result;
+            if (granted)
+            {
+                player.SendChat($"{_config.CurrentValue.MessagePrefix}   Permission '{configPerm}' granted successfully!");
+                
+                // Verify
+                var hasPermission = _core.Permission.PlayerHasPermission(player.SteamID, configPerm);
+                player.SendChat($"{_config.CurrentValue.MessagePrefix}   Verification: {(hasPermission ? "✅ YES" : "❌ NO")}");
+                
+                if (hasPermission)
+                {
+                    player.SendChat($"{_config.CurrentValue.MessagePrefix} 🎉 You can now use chat!");
+                }
+            }
+            else
+            {
+                player.SendChat($"{_config.CurrentValue.MessagePrefix}   ❌ Failed to grant permission!");
+            }
+        }
+        else
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   ❌ No Discord link found in database!");
+        }
+        
+        _core.Logger.LogInformation("Manual permission sync requested by player {SteamId} - Found link: {HasLink}", 
+            player.SteamID, dbLink != null);
+    }
+
+    [Command("checklink")]
+    public void Command_CheckLink(ICommandContext context)
+    {
+        if (!context.IsSentByPlayer) return;
+        
+        var player = context.Sender!;
+        var configPerm = _config.CurrentValue.Permissions.LinkedPermission;
+        var hasPermission = _core.Permission.PlayerHasPermission(player.SteamID, configPerm);
+        
+        player.SendChat($"{_config.CurrentValue.MessagePrefix} Link Status Check:");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   SteamID: {player.SteamID}");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Permission: '{configPerm}'");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Has Permission: {(hasPermission ? "✅ YES" : "❌ NO")}");
+        
+        // Check if linked in database
+        var dbLink = _databaseService.GetLinkBySteamIdAsync(player.SteamID).Result;
+        if (dbLink != null)
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ✅ {dbLink.DiscordUsername} ({dbLink.DiscordUserId})");
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Linked At: {dbLink.LinkedAt}");
+            
+            if (!hasPermission)
+            {
+                player.SendChat($"{_config.CurrentValue.MessagePrefix}   ⚠️  You're linked but missing permission! Type !syncperm");
+            }
+        }
+        else
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ❌ Not linked");
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   💡 Type !link to get your link code");
+        }
+    }
 }

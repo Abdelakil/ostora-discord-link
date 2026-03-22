@@ -331,31 +331,61 @@ public sealed class DatabaseService
                 return false;
             }
 
-            // Create permanent link
-            var discordLink = new DiscordLink
+            // Check if this is a new link or an update to existing link (check BEFORE inserting)
+            var existingLink = await GetLinkBySteamIdAsync(linkCode.SteamId);
+            var isNewLink = existingLink == null;
+
+            if (isNewLink)
             {
-                SteamId = linkCode.SteamId,
-                DiscordUserId = discordUserId,
-                PlayerName = linkCode.PlayerName,
-                DiscordUsername = discordUsername,
-                LinkedAt = (int)now
-            };
+                // Create new permanent link
+                var discordLink = new DiscordLink
+                {
+                    SteamId = linkCode.SteamId,
+                    DiscordUserId = discordUserId,
+                    PlayerName = linkCode.PlayerName,
+                    DiscordUsername = discordUsername,
+                    LinkedAt = (int)now
+                };
 
-            await connection.InsertAsync(discordLink);
-
+                await connection.InsertAsync(discordLink);
+                _core.Logger.LogInformation("Created new Discord link for Steam {SteamId} to Discord {DiscordUserId} ({DiscordUsername})", 
+                    linkCode.SteamId, discordUserId, discordUsername);
+            }
+            else
+            {
+                // Update existing link
+                existingLink.DiscordUserId = discordUserId;
+                existingLink.DiscordUsername = discordUsername;
+                existingLink.PlayerName = linkCode.PlayerName;
+                existingLink.LinkedAt = (int)now;
+                await connection.UpdateAsync(existingLink);
+                
+                _core.Logger.LogInformation("Updated existing Discord link for Steam {SteamId} from {OldDiscordUser} to {NewDiscordUser} ({NewDiscordUsername})", 
+                    linkCode.SteamId, existingLink.DiscordUserId, discordUserId, discordUsername);
+            }
+            
             // Update the original code
             linkCode.DiscordUserId = discordUserId;
             linkCode.DiscordUsername = discordUsername;
             linkCode.LinkedAt = (int)now;
             await connection.UpdateAsync(linkCode);
 
-            _core.Logger.LogInformation("Successfully linked code '{Code}' - Steam: {SteamId} to Discord: {DiscordUserId} ({DiscordUsername})", 
-                code, linkCode.SteamId, discordUserId, discordUsername);
+            _core.Logger.LogInformation("Successfully {Action} code '{Code}' - Steam: {SteamId} to Discord: {DiscordUserId} ({DiscordUsername})", 
+                isNewLink ? "linked" : "relinked", code, linkCode.SteamId, discordUserId, discordUsername);
 
-            // Grant permission if configured
+            // Grant permission if configured (for both new links and relinks)
             if (_config?.CurrentValue?.Permissions?.GrantOnLink == true && !string.IsNullOrEmpty(_config?.CurrentValue?.Permissions?.LinkedPermission))
             {
                 await GrantLinkedPermissionAsync(linkCode.SteamId, _config.CurrentValue.Permissions.LinkedPermission);
+                
+                if (isNewLink)
+                {
+                    _core.Logger.LogInformation("Granted permission for new Discord link for player {SteamId}", linkCode.SteamId);
+                }
+                else
+                {
+                    _core.Logger.LogInformation("Granted permission for Discord relink for player {SteamId}", linkCode.SteamId);
+                }
             }
 
             return true;
@@ -680,6 +710,12 @@ public sealed class DatabaseService
             
             _core.Logger.LogInformation("Granted permission '{Permission}' to player {SteamId} ({PlayerName})", 
                 permission, steamId, player.Controller.PlayerName);
+            
+            // Force permission check to verify it was granted
+            await Task.Delay(100); // Small delay to ensure permission is processed
+            var hasPermission = _core.Permission.PlayerHasPermission(steamId, permission);
+            _core.Logger.LogInformation("Permission verification for player {SteamId} - Has '{Permission}': {HasPermission}", 
+                steamId, permission, hasPermission);
             
             return true;
         }

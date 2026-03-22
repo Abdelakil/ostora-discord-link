@@ -56,6 +56,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
         Core.Logger.LogInformation("OSTORA Discord Link plugin loaded successfully!");
     }
 
+    private static readonly HashSet<ulong> _processingPlayers = [];
+
     [EventListener<EventDelegates.OnClientSteamAuthorize>]
     public void OnClientSteamAuthorize(IOnClientSteamAuthorizeEvent e)
     {
@@ -65,19 +67,61 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
             await Task.Delay(5000);
             
             var player = Core.PlayerManager.GetPlayer(e.PlayerId);
-            if (player == null) return;
-
-            // Check if player has an existing Discord link
-            var existingLink = await DatabaseService.GetLinkBySteamIdAsync(player.SteamID);
-            if (existingLink != null)
+            if (player == null) 
             {
-                var config = Config.CurrentValue;
-                if (config?.Permissions?.GrantOnLink == true && !string.IsNullOrEmpty(config?.Permissions?.LinkedPermission))
+                Core.Logger.LogDebug("OnClientSteamAuthorize: Player {PlayerId} not found after delay", e.PlayerId);
+                return;
+            }
+
+            // Prevent duplicate processing
+            lock (_processingPlayers)
+            {
+                if (_processingPlayers.Contains(player.SteamID))
                 {
-                    // Grant permission if they have a Discord link
-                    await DatabaseService.GrantLinkedPermissionAsync(player.SteamID, config.Permissions.LinkedPermission);
-                    Core.Logger.LogInformation("Granted Discord linked permission to connecting player {PlayerName} ({SteamId})", 
+                    Core.Logger.LogDebug("OnClientSteamAuthorize: Already processing player {SteamId}, skipping", player.SteamID);
+                    return;
+                }
+                _processingPlayers.Add(player.SteamID);
+            }
+            
+            try
+            {
+                Core.Logger.LogInformation("OnClientSteamAuthorize: Checking Discord link for player {PlayerName} ({SteamId})", 
+                    player.Controller.PlayerName, player.SteamID);
+
+                // Check if player has an existing Discord link
+                var existingLink = await DatabaseService.GetLinkBySteamIdAsync(player.SteamID);
+                if (existingLink != null)
+                {
+                    var config = Config.CurrentValue;
+                    if (config?.Permissions?.GrantOnLink == true && !string.IsNullOrEmpty(config?.Permissions?.LinkedPermission))
+                    {
+                        // Grant permission if they have a Discord link
+                        Core.Logger.LogInformation("OnClientSteamAuthorize: Player {PlayerName} ({SteamId}) has existing Discord link to {DiscordUser}, granting permission", 
+                            player.Controller.PlayerName, player.SteamID, existingLink.DiscordUsername);
+                        
+                        await DatabaseService.GrantLinkedPermissionAsync(player.SteamID, config.Permissions.LinkedPermission);
+                        Core.Logger.LogInformation("Granted Discord linked permission to connecting player {PlayerName} ({SteamId})", 
+                            player.Controller.PlayerName, player.SteamID);
+                    }
+                    else
+                    {
+                        Core.Logger.LogInformation("OnClientSteamAuthorize: Permission granting disabled for player {PlayerName} ({SteamId}) - GrantOnLink: {GrantOnLink}, Permission: '{Permission}'", 
+                            player.Controller.PlayerName, player.SteamID, config?.Permissions?.GrantOnLink, config?.Permissions?.LinkedPermission);
+                    }
+                }
+                else
+                {
+                    Core.Logger.LogDebug("OnClientSteamAuthorize: Player {PlayerName} ({SteamId}) has no Discord link", 
                         player.Controller.PlayerName, player.SteamID);
+                }
+            }
+            finally
+            {
+                // Remove from processing set
+                lock (_processingPlayers)
+                {
+                    _processingPlayers.Remove(player.SteamID);
                 }
             }
         });
