@@ -97,10 +97,23 @@ public sealed class DatabaseService
                 expires_at INT NOT NULL DEFAULT 0,
                 discord_user_id BIGINT NOT NULL DEFAULT 0,
                 linked_at INT NOT NULL DEFAULT 0,
-                discord_username VARCHAR(64) NOT NULL DEFAULT ''
+                discord_username VARCHAR(64) NOT NULL DEFAULT '',
+                db_name VARCHAR(64) NOT NULL DEFAULT ''
             )";
 
         await connection.ExecuteAsync(createLinkCodesTable);
+
+        // Add db_name column to existing tables (if missing)
+        try
+        {
+            var addColumnSql = "ALTER TABLE discord_link_codes ADD COLUMN IF NOT EXISTS db_name VARCHAR(64) NOT NULL DEFAULT ''";
+            await connection.ExecuteAsync(addColumnSql);
+            _core.Logger.LogInformation("Verified db_name column exists in discord_link_codes table");
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogDebug("Could not add db_name column (may already exist): {Message}", ex.Message);
+        }
 
         // Create indexes for link codes
         var createIndexes = @"
@@ -178,7 +191,8 @@ public sealed class DatabaseService
                 SteamId = steamId,
                 PlayerName = playerName,
                 CreatedAt = (int)now,
-                ExpiresAt = expiresAt
+                ExpiresAt = expiresAt,
+                DbName = GetDatabaseName()
             };
 
             using var connection = _core.Database.GetConnection(_connectionName);
@@ -219,7 +233,8 @@ public sealed class DatabaseService
                     expires_at AS ExpiresAt, 
                     discord_user_id AS DiscordUserId, 
                     linked_at AS LinkedAt, 
-                    discord_username AS DiscordUsername
+                    discord_username AS DiscordUsername,
+                    db_name AS DbName
                 FROM discord_link_codes 
                 WHERE steam_id = @steamId AND discord_user_id = 0 AND (expires_at = 0 OR expires_at > @now)
                 LIMIT 1";
@@ -257,7 +272,7 @@ public sealed class DatabaseService
 
             var sql = @"
                 SELECT 
-                    code, steam_id, player_name, created_at, expires_at, discord_user_id, linked_at, discord_username 
+                    code, steam_id, player_name, created_at, expires_at, discord_user_id, linked_at, discord_username, db_name 
                 FROM discord_link_codes 
                 WHERE code = @code
                 LIMIT 1";
@@ -407,6 +422,62 @@ public sealed class DatabaseService
         {
             _core.Logger.LogError(ex, "Error getting Discord link for Discord user {DiscordUserId}", discordUserId);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Get the database name from connection string
+    /// </summary>
+    private string GetDatabaseName()
+    {
+        try
+        {
+            using var connection = _core.Database.GetConnection(_connectionName);
+            var connectionString = connection.ConnectionString;
+            
+            if (string.IsNullOrEmpty(connectionString))
+                return "unknown";
+
+            // Parse different connection string formats
+            if (connectionString.Contains("Database="))
+            {
+                var parts = connectionString.Split(';');
+                foreach (var part in parts)
+                {
+                    if (part.StartsWith("Database="))
+                        return part.Substring(9);
+                }
+            }
+            else if (connectionString.Contains("database="))
+            {
+                var parts = connectionString.Split(';');
+                foreach (var part in parts)
+                {
+                    if (part.StartsWith("database="))
+                        return part.Substring(9);
+                }
+            }
+            
+            // For SQLite, use the file path
+            if (connectionString.Contains("Data Source="))
+            {
+                var parts = connectionString.Split(';');
+                foreach (var part in parts)
+                {
+                    if (part.StartsWith("Data Source="))
+                    {
+                        var filePath = part.Substring(12);
+                        return Path.GetFileNameWithoutExtension(filePath);
+                    }
+                }
+            }
+            
+            return "default";
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogWarning(ex, "Failed to get database name");
+            return "unknown";
         }
     }
 

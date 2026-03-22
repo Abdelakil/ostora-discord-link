@@ -45,6 +45,10 @@ public sealed class LinkCode
     [Column("discord_username")]
     public string DiscordUsername { get; set; } = "";
 
+    /// <summary>Database name where this code was generated</summary>
+    [Column("db_name")]
+    public string DbName { get; set; } = "";
+
     /// <summary>Whether this code is still valid for linking</summary>
     [Ignore]
     public bool IsValid => DiscordUserId == 0 && (ExpiresAt == 0 || ExpiresAt > DateTimeOffset.UtcNow.ToUnixTimeSeconds());
