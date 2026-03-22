@@ -5,6 +5,7 @@ using OstoraDiscordLink.Database;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Players;
 
 namespace OstoraDiscordLink.Services;
 
@@ -15,22 +16,14 @@ public class CommandService
     private readonly CodeGenerationService _codeGenerationService;
     private readonly DatabaseService _databaseService;
 
-    public CommandService(
-        ISwiftlyCore core,
-        IOptionsMonitor<PluginConfig> config,
-        CodeGenerationService codeGenerationService,
-        DatabaseService databaseService)
+    public CommandService(ISwiftlyCore core, IOptionsMonitor<PluginConfig> config, CodeGenerationService codeGenerationService, DatabaseService databaseService)
     {
         _core = core;
         _config = config;
         _codeGenerationService = codeGenerationService;
         _databaseService = databaseService;
 
-        // Log current config values for debugging
-        var currentConfig = _config.CurrentValue;
-        _core.Logger.LogInformation("OSTORA Discord Link - Config loaded: Command='{Command}', CodeLength={CodeLength}, Prefix='{MessagePrefix}', Database='{DatabaseConnection}', Expiry={ExpiryMinutes}min", 
-            currentConfig.Command, currentConfig.CodeLength, currentConfig.MessagePrefix, currentConfig.Database.Connection, currentConfig.CodeSettings.ExpiryMinutes);
-
+        // Register commands with SwiftlyS2
         core.Registrator.Register(this);
     }
 
@@ -163,5 +156,62 @@ public class CommandService
         }
 
         return HookResult.Handled;
+    }
+
+    [Command("checkperm")]
+    public void Command_CheckPerm(ICommandContext context)
+    {
+        if (!context.IsSentByPlayer) return;
+        
+        var player = context.Sender!;
+        var configPerm = _config.CurrentValue.Permissions.LinkedPermission;
+        var hasPermission = _core.Permission.PlayerHasPermission(player.SteamID, configPerm);
+        
+        player.SendChat($"{_config.CurrentValue.MessagePrefix} Permission Check:");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   SteamID: {player.SteamID}");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Permission: '{configPerm}'");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Has Permission: {(hasPermission ? "✅ YES" : "❌ NO")}");
+        
+        // Check if linked in database
+        var dbLink = _databaseService.GetLinkBySteamIdAsync(player.SteamID).Result;
+        if (dbLink != null)
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ✅ Linked to {dbLink.DiscordUsername} ({dbLink.DiscordUserId})");
+        }
+        else
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ❌ Not linked");
+        }
+    }
+
+    [Command("debuglink")]
+    public void Command_DebugLink(ICommandContext context)
+    {
+        if (!context.IsSentByPlayer) return;
+        
+        var player = context.Sender!;
+        var configPerm = _config.CurrentValue.Permissions.LinkedPermission;
+        var hasPermission = _core.Permission.PlayerHasPermission(player.SteamID, configPerm);
+        
+        player.SendChat($"{_config.CurrentValue.MessagePrefix} Debug Link Status:");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   SteamID: {player.SteamID}");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Permission: '{configPerm}'");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Has Permission: {(hasPermission ? "✅ YES" : "❌ NO")}");
+        
+        // Check if linked in database
+        var dbLink = _databaseService.GetLinkBySteamIdAsync(player.SteamID).Result;
+        if (dbLink != null)
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ✅ Linked to {dbLink.DiscordUsername} ({dbLink.DiscordUserId})");
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Linked At: {dbLink.LinkedAt}");
+        }
+        else
+        {
+            player.SendChat($"{_config.CurrentValue.MessagePrefix}   Database Link: ❌ Not linked");
+        }
+        
+        // Check database service status
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   DB Service Enabled: {_databaseService.IsEnabled}");
+        player.SendChat($"{_config.CurrentValue.MessagePrefix}   Grant On Link: {_config.CurrentValue.Permissions.GrantOnLink}");
     }
 }

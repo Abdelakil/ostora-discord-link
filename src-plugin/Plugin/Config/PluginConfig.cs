@@ -9,6 +9,7 @@ public class PluginConfig
     public string CodeMessage { get; set; } = "Your link code is: {0}";
     public DatabaseSettings Database { get; set; } = new();
     public CodeSettings CodeSettings { get; set; } = new();
+    public PermissionSettings Permissions { get; set; } = new();
 }
 
 public class DatabaseSettings
@@ -25,6 +26,18 @@ public class CodeSettings
     /// <summary>Code expiry time in minutes (0 = never expires)</summary>
     public int ExpiryMinutes { get; set; } = 15;
     
-    /// <summary>Maximum number of attempts to generate unique code</summary>
+    /// <summary>Maximum attempts to generate a unique code</summary>
     public int MaxGenerationAttempts { get; set; } = 10;
+}
+
+public class PermissionSettings
+{
+    /// <summary>Permission to grant when Discord account is linked</summary>
+    public string LinkedPermission { get; set; } = "ostora.discord.linked";
+    
+    /// <summary>Whether to automatically grant permission on linking</summary>
+    public bool GrantOnLink { get; set; } = true;
+    
+    /// <summary>Whether to automatically revoke permission on unlinking</summary>
+    public bool RevokeOnUnlink { get; set; } = true;
 }

@@ -12,6 +12,11 @@
     "CodeSettings": {
       "ExpiryMinutes": 15,
       "MaxGenerationAttempts": 10
+    },
+    "Permissions": {
+      "LinkedPermission": "ostora.discord.linked",
+      "GrantOnLink": true,
+      "RevokeOnUnlink": true
     }
   }
 }

@@ -6,6 +6,7 @@ using OstoraDiscordLink.Config;
 using OstoraDiscordLink.Database;
 using OstoraDiscordLink.Services;
 using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Plugins;
 
 namespace OstoraDiscordLink;
@@ -20,7 +21,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
     internal CommandService CommandService { get; private set; } = null!;
     internal DatabaseService DatabaseService { get; private set; } = null!;
 
-    public override void Load(bool hotReload)
+    public override async void Load(bool hotReload)
     {
         Core = base.Core;
 
@@ -31,36 +32,55 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
         Core.Logger.LogInformation("Raw config values - Database.Connection: '{DbConnection}', CodeSettings.ExpiryMinutes: {ExpiryMinutes}", 
             config.Database.Connection, config.CodeSettings.ExpiryMinutes);
         
+        Core.Logger.LogInformation("Full config dump - Command: '{Command}', UnlinkCommand: '{UnlinkCommand}', CodeLength: {CodeLength}, Prefix: '{Prefix}', DB: '{DB}', Expiry: {Expiry}, Purge: {PurgeDays}, GrantOnLink: {GrantOnLink}, RevokeOnUnlink: {RevokeOnUnlink}, Permission: '{Permission}'", 
+            config.Command, config.UnlinkCommand, config.CodeLength, config.MessagePrefix, config.Database.Connection, config.CodeSettings.ExpiryMinutes, config.Database.PurgeDays, config.Permissions.GrantOnLink, config.Permissions.RevokeOnUnlink, config.Permissions.LinkedPermission);
+        
         DatabaseService = new DatabaseService(
             Core, 
             config.Database.Connection,
             config.CodeSettings.ExpiryMinutes,
-            config.Database.PurgeDays
+            config.Database.PurgeDays,
+            Config
         );
 
         // Initialize other services
         CodeGenerationService = new CodeGenerationService();
         CommandService = new CommandService(Core, Config, CodeGenerationService, DatabaseService);
 
-        // Initialize database asynchronously
-        Task.Run(async () => 
-        {
-            await DatabaseService.InitializeAsync();
-            
-            if (DatabaseService.IsEnabled)
-            {
-                var stats = await DatabaseService.GetStatsAsync();
-                Core.Logger.LogInformation("Database Stats - Total codes: {TotalCodes}, Active: {ActiveCodes}, Linked: {LinkedCodes}, Links: {TotalLinks}", 
-                    stats.TotalCodes, stats.ActiveCodes, stats.LinkedCodes, stats.TotalLinks);
-                
-                // Log database configuration for verification
-                var config = Config.CurrentValue;
-                Core.Logger.LogInformation("Database Configuration - Connection: '{Connection}', Expiry: {ExpiryMinutes}min, Purge: {PurgeDays}days", 
-                    config.Database.Connection, config.CodeSettings.ExpiryMinutes, config.Database.PurgeDays);
-            }
-        });
+        // Initialize database service
+        await DatabaseService.InitializeAsync();
+
+        // Set up event handler for player connections to grant permissions
+        Core.Registrator.Register(this);
 
         Core.Logger.LogInformation("OSTORA Discord Link plugin loaded successfully!");
+    }
+
+    [EventListener<EventDelegates.OnClientSteamAuthorize>]
+    public void OnClientSteamAuthorize(IOnClientSteamAuthorizeEvent e)
+    {
+        Task.Run(async () =>
+        {
+            // Wait a bit for the player to fully connect
+            await Task.Delay(5000);
+            
+            var player = Core.PlayerManager.GetPlayer(e.PlayerId);
+            if (player == null) return;
+
+            // Check if player has an existing Discord link
+            var existingLink = await DatabaseService.GetLinkBySteamIdAsync(player.SteamID);
+            if (existingLink != null)
+            {
+                var config = Config.CurrentValue;
+                if (config?.Permissions?.GrantOnLink == true && !string.IsNullOrEmpty(config?.Permissions?.LinkedPermission))
+                {
+                    // Grant permission if they have a Discord link
+                    await DatabaseService.GrantLinkedPermissionAsync(player.SteamID, config.Permissions.LinkedPermission);
+                    Core.Logger.LogInformation("Granted Discord linked permission to connecting player {PlayerName} ({SteamId})", 
+                        player.Controller.PlayerName, player.SteamID);
+                }
+            }
+        });
     }
 
     private IOptionsMonitor<T> BuildConfigService<T>(string fileName, string sectionName) where T : class, new()

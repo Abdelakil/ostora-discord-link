@@ -1,6 +1,8 @@
 using Dapper;
 using Dommel;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using OstoraDiscordLink.Config;
 using OstoraDiscordLink.Database.Models;
 using SwiftlyS2.Shared;
 using System.Data;
@@ -17,18 +19,20 @@ public sealed class DatabaseService
     private readonly string _connectionName;
     private readonly int _codeExpiryMinutes;
     private readonly int _purgeDays;
+    private readonly IOptionsMonitor<PluginConfig> _config;
 
     public bool IsEnabled { get; private set; }
 
     public const string LinkCodesTableName = "discord_link_codes";
     public const string LinksTableName = "discord_links";
 
-    public DatabaseService(ISwiftlyCore core, string connectionName, int codeExpiryMinutes, int purgeDays)
+    public DatabaseService(ISwiftlyCore core, string connectionName, int codeExpiryMinutes, int purgeDays, IOptionsMonitor<PluginConfig> config)
     {
         _core = core;
         _connectionName = connectionName;
         _codeExpiryMinutes = codeExpiryMinutes;
         _purgeDays = purgeDays;
+        _config = config;
     }
 
     /// <summary>
@@ -294,7 +298,7 @@ public sealed class DatabaseService
     }
 
     /// <summary>
-    /// Link a code to a Discord user
+    /// Link a Discord user to a Steam account using a code
     /// </summary>
     public async Task<bool> LinkCodeAsync(string code, ulong discordUserId, string discordUsername)
     {
@@ -305,44 +309,54 @@ public sealed class DatabaseService
             using var connection = _core.Database.GetConnection(_connectionName);
             connection.Open();
 
-            // Get the code
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            // Find the code
             var linkCode = await GetCodeByCodeAsync(code);
-            if (linkCode == null || !linkCode.IsValid)
+            if (linkCode == null)
             {
-                _core.Logger.LogWarning("Invalid or expired code '{Code}' for Discord link attempt", code);
+                _core.Logger.LogWarning("Link code '{Code}' not found", code);
                 return false;
             }
 
-            // Update the code
-            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var updateCodeSql = @"
-                UPDATE discord_link_codes 
-                SET discord_user_id = @discord_user_id, discord_username = @discord_username, linked_at = @linked_at 
-                WHERE code = @code";
+            if (linkCode.DiscordUserId != 0)
+            {
+                _core.Logger.LogWarning("Link code '{Code}' already linked to Discord user {DiscordUserId}", code, linkCode.DiscordUserId);
+                return false;
+            }
 
-            await connection.ExecuteAsync(updateCodeSql, new { 
-                discord_user_id = discordUserId, 
-                discord_username = discordUsername, 
-                linked_at = (int)now,
-                code = code 
-            });
+            if (linkCode.ExpiresAt > 0 && linkCode.ExpiresAt <= now)
+            {
+                _core.Logger.LogWarning("Link code '{Code}' expired at {ExpiresAt}", code, linkCode.ExpiresAt);
+                return false;
+            }
 
-            // Create permanent link record
-            var insertLinkSql = @"
-                INSERT INTO discord_links 
-                (steam_id, discord_user_id, player_name, discord_username, linked_at)
-                VALUES (@steam_id, @discord_user_id, @player_name, @discord_username, @linked_at)";
+            // Create permanent link
+            var discordLink = new DiscordLink
+            {
+                SteamId = linkCode.SteamId,
+                DiscordUserId = discordUserId,
+                PlayerName = linkCode.PlayerName,
+                DiscordUsername = discordUsername,
+                LinkedAt = (int)now
+            };
 
-            await connection.ExecuteAsync(insertLinkSql, new {
-                steam_id = linkCode.SteamId,
-                discord_user_id = discordUserId,
-                player_name = linkCode.PlayerName,
-                discord_username = discordUsername,
-                linked_at = (int)now
-            });
+            await connection.InsertAsync(discordLink);
 
-            _core.Logger.LogInformation("Successfully linked code '{Code}' - Steam: {SteamId} to Discord: {DiscordUser} ({DiscordUserId})", 
-                code, linkCode.SteamId, discordUsername, discordUserId);
+            // Update the original code
+            linkCode.DiscordUserId = discordUserId;
+            linkCode.DiscordUsername = discordUsername;
+            linkCode.LinkedAt = (int)now;
+            await connection.UpdateAsync(linkCode);
+
+            _core.Logger.LogInformation("Successfully linked code '{Code}' - Steam: {SteamId} to Discord: {DiscordUserId} ({DiscordUsername})", 
+                code, linkCode.SteamId, discordUserId, discordUsername);
+
+            // Grant permission if configured
+            if (_config?.CurrentValue?.Permissions?.GrantOnLink == true && !string.IsNullOrEmpty(_config?.CurrentValue?.Permissions?.LinkedPermission))
+            {
+                await GrantLinkedPermissionAsync(linkCode.SteamId, _config.CurrentValue.Permissions.LinkedPermission);
+            }
 
             return true;
         }
@@ -629,11 +643,81 @@ public sealed class DatabaseService
             _core.Logger.LogInformation("Successfully unlinked player {SteamId} from Discord user {DiscordUserId} ({DiscordUsername})", 
                 steamId, existingLink.DiscordUserId, existingLink.DiscordUsername);
 
+            // Revoke permission if configured
+            if (_config?.CurrentValue?.Permissions?.RevokeOnUnlink == true && !string.IsNullOrEmpty(_config?.CurrentValue?.Permissions?.LinkedPermission))
+            {
+                await RevokeLinkedPermissionAsync(steamId, _config.CurrentValue.Permissions.LinkedPermission);
+            }
+
             return true;
         }
         catch (Exception ex)
         {
             _core.Logger.LogError(ex, "Error unlinking player {SteamId}", steamId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Grant permission to a player when Discord account is linked
+    /// </summary>
+    public async Task<bool> GrantLinkedPermissionAsync(ulong steamId, string permission)
+    {
+        if (!IsEnabled) return false;
+
+        try
+        {
+            // Check if player is online
+            var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+            if (player == null)
+            {
+                _core.Logger.LogDebug("Player {SteamId} is not online, cannot grant permission", steamId);
+                return false;
+            }
+
+            // Grant permission using SwiftlyS2's permission system
+            _core.Permission.AddPermission(steamId, permission);
+            
+            _core.Logger.LogInformation("Granted permission '{Permission}' to player {SteamId} ({PlayerName})", 
+                permission, steamId, player.Controller.PlayerName);
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogError(ex, "Error granting permission '{Permission}' to player {SteamId}", permission, steamId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Revoke permission from a player when Discord account is unlinked
+    /// </summary>
+    public async Task<bool> RevokeLinkedPermissionAsync(ulong steamId, string permission)
+    {
+        if (!IsEnabled) return false;
+
+        try
+        {
+            // Check if player is online
+            var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+            if (player == null)
+            {
+                _core.Logger.LogDebug("Player {SteamId} is not online, cannot revoke permission", steamId);
+                return false;
+            }
+
+            // Revoke permission using SwiftlyS2's permission system
+            _core.Permission.RemovePermission(steamId, permission);
+            
+            _core.Logger.LogInformation("Revoked permission '{Permission}' from player {SteamId} ({PlayerName})", 
+                permission, steamId, player.Controller.PlayerName);
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogError(ex, "Error revoking permission '{Permission}' from player {SteamId}", permission, steamId);
             return false;
         }
     }
