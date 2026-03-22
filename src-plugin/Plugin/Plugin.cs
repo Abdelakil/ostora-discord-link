@@ -53,6 +53,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
         // Set up event handler for player connections to grant permissions
         Core.Registrator.Register(this);
 
+        // Start background event processing task
+        _ = Task.Run(EventProcessingLoop);
+
         Core.Logger.LogInformation("OSTORA Discord Link plugin loaded successfully!");
     }
 
@@ -125,6 +128,25 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
                 }
             }
         });
+    }
+
+    private async Task EventProcessingLoop()
+    {
+        Core.Logger.LogInformation("Starting Discord Link event processing loop");
+
+        while (true)
+        {
+            try
+            {
+                await Task.Delay(2000); // Process every 2 seconds
+                await DatabaseService.ProcessPendingEventsAsync();
+            }
+            catch (Exception ex)
+            {
+                Core.Logger.LogError(ex, "Error in event processing loop");
+                await Task.Delay(5000); // Wait longer on error
+            }
+        }
     }
 
     private IOptionsMonitor<T> BuildConfigService<T>(string fileName, string sectionName) where T : class, new()

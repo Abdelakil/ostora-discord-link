@@ -62,52 +62,90 @@ public sealed class DatabaseService
                 return;
             }
 
-            // Create tables directly (no migrations)
-            await CreateTablesAsync();
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+
+            // Create link codes table
+            var createCodesTableSql = @"
+                CREATE TABLE IF NOT EXISTS discord_link_codes (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    steam_id BIGINT NOT NULL,
+                    code VARCHAR(16) NOT NULL UNIQUE,
+                    player_name VARCHAR(128) NOT NULL,
+                    discord_user_id BIGINT DEFAULT 0,
+                    discord_username VARCHAR(64) DEFAULT '',
+                    created_at BIGINT NOT NULL,
+                    expires_at BIGINT DEFAULT 0,
+                    linked_at BIGINT DEFAULT 0
+                )";
+
+            await connection.ExecuteAsync(createCodesTableSql);
+
+            // Create indexes for link codes table
+            var createCodesIndexesSql = @"
+                CREATE INDEX IF NOT EXISTS idx_discord_link_codes_steam_id ON discord_link_codes(steam_id);
+                CREATE INDEX IF NOT EXISTS idx_discord_link_codes_code ON discord_link_codes(code);
+                CREATE INDEX IF NOT EXISTS idx_discord_link_codes_expires_at ON discord_link_codes(expires_at)";
+
+            await connection.ExecuteAsync(createCodesIndexesSql);
+
+            // Create links table
+            var createLinksTableSql = @"
+                CREATE TABLE IF NOT EXISTS discord_links (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    steam_id BIGINT NOT NULL UNIQUE,
+                    discord_user_id BIGINT NOT NULL,
+                    discord_username VARCHAR(64) NOT NULL,
+                    player_name VARCHAR(128) NOT NULL,
+                    linked_at BIGINT NOT NULL
+                )";
+
+            await connection.ExecuteAsync(createLinksTableSql);
+
+            // Create indexes for links table
+            var createLinksIndexesSql = @"
+                CREATE INDEX IF NOT EXISTS idx_discord_links_steam_id ON discord_links(steam_id);
+                CREATE INDEX IF NOT EXISTS idx_discord_links_discord_id ON discord_links(discord_user_id)";
+
+            await connection.ExecuteAsync(createLinksIndexesSql);
+
+            // Create events table for real-time sync
+            var createEventsTableSql = @"
+                CREATE TABLE IF NOT EXISTS discord_link_events (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    steam_id BIGINT NOT NULL,
+                    action VARCHAR(16) NOT NULL, -- 'link', 'unlink', 'relink'
+                    discord_user_id BIGINT DEFAULT 0,
+                    discord_username VARCHAR(64) DEFAULT '',
+                    permission VARCHAR(128) DEFAULT '',
+                    created_at BIGINT NOT NULL,
+                    processed BOOLEAN DEFAULT FALSE
+                )";
+
+            await connection.ExecuteAsync(createEventsTableSql);
+
+            // Create indexes for events table
+            var createEventsIndexesSql = @"
+                CREATE INDEX IF NOT EXISTS idx_discord_link_events_processed ON discord_link_events(processed, created_at);
+                CREATE INDEX IF NOT EXISTS idx_discord_link_events_steam_id ON discord_link_events(steam_id)";
+
+            await connection.ExecuteAsync(createEventsIndexesSql);
+
+            // Verify db_name column exists in link codes table
+            await EnsureDbNameColumnExists(connection);
 
             IsEnabled = true;
-            _core.Logger.LogInformation("Discord Link database initialized successfully. Tables: {Tables}", 
-                $"{LinkCodesTableName}, {LinksTableName}");
-
-            // Clean up expired codes and old data
-            await CleanupExpiredCodesAsync();
-            await PurgeOldRecordsAsync();
-            
-            // Fix existing codes with no expiry
-            await FixExistingCodesAsync();
+            _core.Logger.LogInformation("Discord Link database service initialized successfully");
         }
         catch (Exception ex)
         {
-            _core.Logger.LogError(ex, "Failed to initialize Discord Link database");
+            _core.Logger.LogError(ex, "Error initializing Discord Link database service");
             IsEnabled = false;
         }
     }
 
-    /// <summary>
-    /// Create database tables directly
-    /// </summary>
-    private async Task CreateTablesAsync()
+    private async Task EnsureDbNameColumnExists(IDbConnection connection)
     {
-        using var connection = _core.Database.GetConnection(_connectionName);
-        connection.Open();
-
-        // Create link codes table (only if doesn't exist)
-        var createLinkCodesTable = @"
-            CREATE TABLE IF NOT EXISTS discord_link_codes (
-                code VARCHAR(32) NOT NULL PRIMARY KEY,
-                steam_id BIGINT NOT NULL,
-                player_name VARCHAR(64) NOT NULL DEFAULT '',
-                created_at INT NOT NULL,
-                expires_at INT NOT NULL DEFAULT 0,
-                discord_user_id BIGINT NOT NULL DEFAULT 0,
-                linked_at INT NOT NULL DEFAULT 0,
-                discord_username VARCHAR(64) NOT NULL DEFAULT '',
-                db_name VARCHAR(64) NOT NULL DEFAULT ''
-            )";
-
-        await connection.ExecuteAsync(createLinkCodesTable);
-
-        // Add db_name column to existing tables (if missing)
         try
         {
             var addColumnSql = "ALTER TABLE discord_link_codes ADD COLUMN IF NOT EXISTS db_name VARCHAR(64) NOT NULL DEFAULT ''";
@@ -119,37 +157,8 @@ public sealed class DatabaseService
             _core.Logger.LogDebug("Could not add db_name column (may already exist): {Message}", ex.Message);
         }
 
-        // Create indexes for link codes
-        var createIndexes = @"
-            CREATE INDEX IF NOT EXISTS idx_link_codes_steam ON discord_link_codes(steam_id);
-            CREATE INDEX IF NOT EXISTS idx_link_codes_discord ON discord_link_codes(discord_user_id);
-            CREATE INDEX IF NOT EXISTS idx_link_codes_created ON discord_link_codes(created_at);
-            CREATE INDEX IF NOT EXISTS idx_link_codes_expires ON discord_link_codes(expires_at)";
-
-        await connection.ExecuteAsync(createIndexes);
-
-        // Create simplified links table (only if doesn't exist)
-        var createLinksTable = @"
-            CREATE TABLE IF NOT EXISTS discord_links (
-                steam_id BIGINT NOT NULL,
-                discord_user_id BIGINT NOT NULL,
-                player_name VARCHAR(64) NOT NULL DEFAULT '',
-                discord_username VARCHAR(64) NOT NULL DEFAULT '',
-                linked_at INT NOT NULL,
-                PRIMARY KEY (steam_id, discord_user_id)
-            )";
-
-        await connection.ExecuteAsync(createLinksTable);
-
-        // Create indexes for links
-        var createLinkIndexes = @"
-            CREATE INDEX IF NOT EXISTS idx_links_steam ON discord_links(steam_id);
-            CREATE INDEX IF NOT EXISTS idx_links_discord ON discord_links(discord_user_id);
-            CREATE INDEX IF NOT EXISTS idx_links_linked ON discord_links(linked_at)";
-
-        await connection.ExecuteAsync(createLinkIndexes);
-
-        _core.Logger.LogInformation("Database tables verified and ready");
+        IsEnabled = true;
+        _core.Logger.LogInformation("Discord Link database service initialized successfully");
     }
 
     /// <summary>
@@ -381,10 +390,12 @@ public sealed class DatabaseService
                 if (isNewLink)
                 {
                     _core.Logger.LogInformation("Granted permission for new Discord link for player {SteamId}", linkCode.SteamId);
+                    await CreateLinkEvent(linkCode.SteamId, "link", discordUserId, discordUsername, _config.CurrentValue.Permissions.LinkedPermission);
                 }
                 else
                 {
                     _core.Logger.LogInformation("Granted permission for Discord relink for player {SteamId}", linkCode.SteamId);
+                    await CreateLinkEvent(linkCode.SteamId, "relink", discordUserId, discordUsername, _config.CurrentValue.Permissions.LinkedPermission);
                 }
             }
 
@@ -677,6 +688,7 @@ public sealed class DatabaseService
             if (_config?.CurrentValue?.Permissions?.RevokeOnUnlink == true && !string.IsNullOrEmpty(_config?.CurrentValue?.Permissions?.LinkedPermission))
             {
                 await RevokeLinkedPermissionAsync(steamId, _config.CurrentValue.Permissions.LinkedPermission);
+                await CreateLinkEvent(steamId, "unlink", existingLink.DiscordUserId, existingLink.DiscordUsername, _config.CurrentValue.Permissions.LinkedPermission);
             }
 
             return true;
@@ -755,6 +767,119 @@ public sealed class DatabaseService
         {
             _core.Logger.LogError(ex, "Error revoking permission '{Permission}' from player {SteamId}", permission, steamId);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Create a link event for real-time synchronization
+    /// </summary>
+    private async Task CreateLinkEvent(ulong steamId, string action, ulong discordUserId, string discordUsername, string permission)
+    {
+        if (!IsEnabled) return;
+
+        try
+        {
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            
+            var insertEventSql = @"
+                INSERT INTO discord_link_events (steam_id, action, discord_user_id, discord_username, permission, created_at, processed)
+                VALUES (@steam_id, @action, @discord_user_id, @discord_username, @permission, @created_at, @processed)";
+
+            await connection.ExecuteAsync(insertEventSql, new
+            {
+                steam_id = steamId,
+                action = action,
+                discord_user_id = discordUserId,
+                discord_username = discordUsername,
+                permission = permission,
+                created_at = now,
+                processed = false
+            });
+
+            _core.Logger.LogDebug("Created link event: {Action} for Steam {SteamId}, Discord {DiscordUser}", 
+                action, steamId, discordUserId);
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogError(ex, "Error creating link event for player {SteamId}", steamId);
+        }
+    }
+
+    /// <summary>
+    /// Process unprocessed link events (for real-time sync)
+    /// </summary>
+    public async Task ProcessPendingEventsAsync()
+    {
+        if (!IsEnabled) return;
+
+        try
+        {
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+
+            // Get unprocessed events
+            var getEventsSql = @"
+                SELECT steam_id, action, discord_user_id, discord_username, permission 
+                FROM discord_link_events 
+                WHERE processed = FALSE 
+                ORDER BY created_at ASC 
+                LIMIT 50";
+
+            var events = await connection.QueryAsync<dynamic>(getEventsSql);
+
+            foreach (var evt in events)
+            {
+                try
+                {
+                    var steamId = (ulong)evt.steam_id;
+                    var action = (string)evt.action;
+                    var permission = (string)evt.permission;
+
+                    switch (action.ToLower())
+                    {
+                        case "link":
+                        case "relink":
+                            // Grant permission
+                            _core.Permission.AddPermission(steamId, permission);
+                            _core.Logger.LogInformation("Event-sync: Granted permission '{Permission}' to player {SteamId} ({Action})", 
+                                permission, steamId, action);
+                            break;
+
+                        case "unlink":
+                            // Revoke permission
+                            _core.Permission.RemovePermission(steamId, permission);
+                            _core.Logger.LogInformation("Event-sync: Revoked permission '{Permission}' from player {SteamId} ({Action})", 
+                                permission, steamId, action);
+                            break;
+                    }
+
+                    // Mark event as processed
+                    var markProcessedSql = "UPDATE discord_link_events SET processed = TRUE WHERE steam_id = @steam_id AND action = @action AND created_at = (SELECT MAX(created_at) FROM discord_link_events WHERE steam_id = @steam_id AND action = @action AND processed = FALSE)";
+                    await connection.ExecuteAsync(markProcessedSql, new { steam_id = steamId, action = action });
+                }
+                catch (Exception ex)
+                {
+                    var steamId = (ulong)evt.steam_id;
+                    _core.Logger.LogError(ex, "Error processing link event for Steam {SteamId}", steamId);
+                }
+            }
+
+            // Clean up old processed events (older than 1 hour)
+            var cleanupSql = "DELETE FROM discord_link_events WHERE processed = TRUE AND created_at < @cutoff";
+            var cutoff = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds();
+            await connection.ExecuteAsync(cleanupSql, new { cutoff });
+
+            if (events.Any())
+            {
+                _core.Logger.LogDebug("Processed {Count} link events", events.Count());
+            }
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogError(ex, "Error processing pending link events");
         }
     }
 
