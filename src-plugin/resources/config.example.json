@@ -3,6 +3,14 @@
     "Command": "!link",
     "CodeLength": 8,
     "MessagePrefix": "[OSTORA]",
-    "CodeMessage": "Your link code is: {0}"
+    "CodeMessage": "Your link code is: {0}",
+    "Database": {
+      "Connection": "host",
+      "PurgeDays": 30
+    },
+    "CodeSettings": {
+      "ExpiryMinutes": 15,
+      "MaxGenerationAttempts": 10
+    }
   }
 }

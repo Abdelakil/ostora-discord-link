@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OstoraDiscordLink.Config;
+using OstoraDiscordLink.Database;
 using OstoraDiscordLink.Services;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Plugins;
@@ -17,6 +18,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
     internal IOptionsMonitor<PluginConfig> Config { get; private set; } = null!;
     internal CodeGenerationService CodeGenerationService { get; private set; } = null!;
     internal CommandService CommandService { get; private set; } = null!;
+    internal DatabaseService DatabaseService { get; private set; } = null!;
 
     public override void Load(bool hotReload)
     {
@@ -24,8 +26,39 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
         Config = BuildConfigService<PluginConfig>("config.json", "OstoraDiscordLink");
 
+        // Initialize database service
+        var config = Config.CurrentValue;
+        Core.Logger.LogInformation("Raw config values - Database.Connection: '{DbConnection}', CodeSettings.ExpiryMinutes: {ExpiryMinutes}", 
+            config.Database.Connection, config.CodeSettings.ExpiryMinutes);
+        
+        DatabaseService = new DatabaseService(
+            Core, 
+            config.Database.Connection,
+            config.CodeSettings.ExpiryMinutes,
+            config.Database.PurgeDays
+        );
+
+        // Initialize other services
         CodeGenerationService = new CodeGenerationService();
-        CommandService = new CommandService(Core, Config, CodeGenerationService);
+        CommandService = new CommandService(Core, Config, CodeGenerationService, DatabaseService);
+
+        // Initialize database asynchronously
+        Task.Run(async () => 
+        {
+            await DatabaseService.InitializeAsync();
+            
+            if (DatabaseService.IsEnabled)
+            {
+                var stats = await DatabaseService.GetStatsAsync();
+                Core.Logger.LogInformation("Database Stats - Total codes: {TotalCodes}, Active: {ActiveCodes}, Linked: {LinkedCodes}, Links: {TotalLinks}", 
+                    stats.TotalCodes, stats.ActiveCodes, stats.LinkedCodes, stats.TotalLinks);
+                
+                // Log database configuration for verification
+                var config = Config.CurrentValue;
+                Core.Logger.LogInformation("Database Configuration - Connection: '{Connection}', Expiry: {ExpiryMinutes}min, Purge: {PurgeDays}days", 
+                    config.Database.Connection, config.CodeSettings.ExpiryMinutes, config.Database.PurgeDays);
+            }
+        });
 
         Core.Logger.LogInformation("OSTORA Discord Link plugin loaded successfully!");
     }
