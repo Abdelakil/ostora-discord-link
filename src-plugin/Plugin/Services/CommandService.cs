@@ -43,11 +43,53 @@ public class CommandService
 
         var config = _config.CurrentValue;
         
-        if (!text.StartsWith(config.Command, StringComparison.OrdinalIgnoreCase))
+        if (!text.StartsWith(config.Command, StringComparison.OrdinalIgnoreCase) && 
+            !text.StartsWith(config.UnlinkCommand, StringComparison.OrdinalIgnoreCase))
             return HookResult.Continue;
 
         try
         {
+            // Handle unlink command
+            if (text.StartsWith(config.UnlinkCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                _core.Logger.LogInformation("Player {PlayerName} ({SteamId}) requested Discord unlink", 
+                    player.Controller.PlayerName, player.SteamID);
+
+                // Check if database is available
+                if (!_databaseService.IsEnabled)
+                {
+                    player.SendChat($"{config.MessagePrefix} Database is not available. Please contact an administrator.");
+                    _core.Logger.LogWarning("Database service is not enabled when player {SteamId} requested unlink", player.SteamID);
+                    return HookResult.Handled;
+                }
+
+                // Check if player is linked
+                var currentLink = _databaseService.GetLinkBySteamIdAsync(player.SteamID).Result;
+                if (currentLink == null)
+                {
+                    player.SendChat($"{config.MessagePrefix} You are not linked to any Discord account.");
+                    _core.Logger.LogInformation("Player {SteamId} is not linked to any Discord account", player.SteamID);
+                    return HookResult.Handled;
+                }
+
+                // Unlink the player
+                var unlinked = _databaseService.UnlinkPlayerAsync(player.SteamID).Result;
+                if (unlinked)
+                {
+                    player.SendChat($"{config.MessagePrefix} Successfully unlinked from Discord: {currentLink.DiscordUsername} ({currentLink.DiscordUserId})");
+                    _core.Logger.LogInformation("Player {SteamId} successfully unlinked from Discord user {DiscordUserId} ({DiscordUsername})", 
+                        player.SteamID, currentLink.DiscordUserId, currentLink.DiscordUsername);
+                }
+                else
+                {
+                    player.SendChat($"{config.MessagePrefix} Error unlinking account. Please try again later.");
+                    _core.Logger.LogError("Failed to unlink player {SteamId}", player.SteamID);
+                }
+
+                return HookResult.Handled;
+            }
+
+            // Handle link command
             _core.Logger.LogInformation("Player {PlayerName} ({SteamId}) requested Discord link code", 
                 player.Controller.PlayerName, player.SteamID);
 

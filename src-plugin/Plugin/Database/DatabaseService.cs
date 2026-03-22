@@ -597,6 +597,48 @@ public sealed class DatabaseService
     }
 
     /// <summary>
+    /// Unlink a player's Discord account
+    /// </summary>
+    public async Task<bool> UnlinkPlayerAsync(ulong steamId)
+    {
+        if (!IsEnabled) return false;
+
+        try
+        {
+            using var connection = _core.Database.GetConnection(_connectionName);
+            connection.Open();
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            // Get existing link
+            var existingLink = await GetLinkBySteamIdAsync(steamId);
+            if (existingLink == null)
+            {
+                _core.Logger.LogInformation("Player {SteamId} is not linked to any Discord account", steamId);
+                return false;
+            }
+
+            // Delete the permanent link
+            var deleteLinkSql = "DELETE FROM discord_links WHERE steam_id = @steam_id";
+            await connection.ExecuteAsync(deleteLinkSql, new { steam_id = steamId });
+
+            // Also clean up any active codes for this player
+            var deleteCodesSql = "DELETE FROM discord_link_codes WHERE steam_id = @steam_id";
+            await connection.ExecuteAsync(deleteCodesSql, new { steam_id = steamId });
+
+            _core.Logger.LogInformation("Successfully unlinked player {SteamId} from Discord user {DiscordUserId} ({DiscordUsername})", 
+                steamId, existingLink.DiscordUserId, existingLink.DiscordUsername);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _core.Logger.LogError(ex, "Error unlinking player {SteamId}", steamId);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Get database statistics
     /// </summary>
     public async Task<DatabaseStats> GetStatsAsync()

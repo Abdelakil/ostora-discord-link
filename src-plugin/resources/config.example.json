@@ -1,6 +1,7 @@
 {
   "OstoraDiscordLink": {
     "Command": "!link",
+    "UnlinkCommand": "!unlink",
     "CodeLength": 8,
     "MessagePrefix": "[OSTORA]",
     "CodeMessage": "Your link code is: {0}",
