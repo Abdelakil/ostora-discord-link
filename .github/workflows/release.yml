@@ -1,0 +1,153 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from PluginMetadata
+        id: version
+        run: |
+          # Find Version = "x.y.z" in any .cs file
+          VERSION=$(grep -roh 'Version *= *"[^"]*"' --include="*.cs" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not find PluginMetadata Version"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: "**/*.csproj"
+
+      - name: Restore and Publish
+        run: |
+          # Build the plugin
+          dotnet restore src-plugin/OSTORA-Discord-Link.csproj
+          dotnet publish src-plugin/OSTORA-Discord-Link.csproj -c Release -o ./publish
+
+      - name: Create release zip with proper folder structure
+        id: zip
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          
+          # Create the zip with proper folder structure
+          mkdir -p release-artifacts/ostora-discord-link
+          
+          # Copy all files from publish to the plugin folder (excluding the folder itself)
+          cp -r publish/* release-artifacts/ostora-discord-link/
+          
+          # Create the zip from the release-artifacts directory with timestamp
+          cd release-artifacts
+          ZIP_NAME="ostora-discord-link-v${VERSION}-${TIMESTAMP}.zip"
+          zip -r "$ZIP_NAME" ostora-discord-link/
+          
+          echo "Created release-artifacts/$ZIP_NAME"
+          echo "zip-file=$ZIP_NAME" >> $GITHUB_OUTPUT
+          echo "release-tag=v${VERSION}-${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.zip.outputs.release-tag }}
+          name: ostora-discord-link v${{ steps.version.outputs.version }} (${{ steps.zip.outputs.release-tag }})
+          body: |
+            ## ostora-discord-link v${{ steps.version.outputs.version }}
+            
+            ### 🚀 Features
+            - 🔗 Generate unique linking codes for Discord integration
+            - ⚡ Real-time permission synchronization (2-second updates)
+            - 🗄️ Database persistence with MySQL/MariaDB/SQLite support
+            - 🎯 Stateful code management across server restarts
+            - 🔐 Permission system integration with SwiftlyS2
+            - 📊 Comprehensive logging and debugging tools
+            - 🛡️ ChatGuard integration with command exclusions
+            - 🔄 Automatic permission granting/revoking on link/unlink
+            
+            ### 📦 Installation
+            1. Download `${{ steps.zip.outputs.zip-file }}`
+            2. Extract to `addons/swiftlys2/plugins/`
+            3. Configure database in `addons/swiftlys2/configs/ostora.discordlink/config.json`
+            4. Set up Discord bot (see bot-example.py)
+            5. Restart server
+            
+            ### ⚙️ Quick Setup
+            1. Configure database connection in `config.json`:
+            ```jsonc
+            {
+              "Database": {
+                "Connection": "your_database_name"
+              }
+            }
+            ```
+            
+            2. Set up Discord bot with event creation (see bot-example.py)
+            
+            3. Configure permissions in `permissions.jsonc`:
+            ```jsonc
+            {
+              "Permissions": {
+                "PermissionGroups": {
+                  "__default": [],
+                  "linked": ["ostora.chatguard.use"]
+                }
+              }
+            }
+            ```
+            
+            ### 🤖 Discord Bot Integration
+            - Real-time event-based permission synchronization
+            - Automatic permission updates within 2 seconds
+            - Complete bot example included in repository
+            - Supports multiple game servers from one bot
+            
+            ### 🔧 Advanced Features
+            - **Real-time Sync**: 2-second permission updates via database events
+            - **Command Exclusions**: Discord Link commands work even when chat is blocked
+            - **Debug Commands**: `!checklink`, `!syncperm`, `!debuglink` for troubleshooting
+            - **Multi-Database**: Support for multiple game server instances
+            - **Auto Cleanup**: Automatic purging of expired codes and old events
+            
+            ### 📚 Documentation
+            - Complete README with setup instructions
+            - Database schema documentation
+            - Bot integration guide
+            - Troubleshooting guide
+            
+            ### 🙏 Credits
+            Built for SwiftlyS2 framework
+            Real-time event synchronization system
+            Production-ready Discord integration
+            
+            ---
+            🤖 Auto-generated release from commit ${{ github.sha }}
+          files: |
+            release-artifacts/${{ steps.zip.outputs.zip-file }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

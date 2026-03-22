@@ -1,0 +1,116 @@
+name: Project Automation
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  automate-project:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      # STEP 1: Auto-label and comment with BOT identity 🤖
+      - name: Auto-label and sponsor detection
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}  # Built-in token = github-actions[bot]
+          script: |
+            const isPR = !!context.payload.pull_request;
+            const item = isPR ? context.payload.pull_request : context.payload.issue;
+            const itemAuthor = item.user.login;
+            const itemBody = item.body || '';
+            const isNew = context.payload.action === 'opened';
+
+            // Only label new issues (not PRs)
+            if (!isPR && isNew) {
+              // Extract priority from issue body
+              const priorityMatch = itemBody.match(/### Priority\s*\n\s*(.+)/i) ||
+                                   itemBody.match(/### Urgency\s*\n\s*(.+)/i);
+
+              let priorityLabel = null;
+              if (priorityMatch) {
+                const selection = priorityMatch[1].trim().toLowerCase();
+                // Match priority at the START to avoid false matches like "not critical"
+                if (selection.startsWith('critical')) {
+                  priorityLabel = 'priority: critical';
+                } else if (selection.startsWith('high')) {
+                  priorityLabel = 'priority: high';
+                } else if (selection.startsWith('medium')) {
+                  priorityLabel = 'priority: medium';
+                } else if (selection.startsWith('low')) {
+                  priorityLabel = 'priority: low';
+                }
+              }
+
+              // Extract type from issue body
+              const typeMatch = itemBody.match(/### Type\s*\n\s*(.+)/i) ||
+                               itemBody.match(/### Category\s*\n\s*(.+)/i);
+
+              let typeLabel = null;
+              if (typeMatch) {
+                const selection = typeMatch[1].trim().toLowerCase();
+                if (selection.includes('bug') || selection.includes('error')) {
+                  typeLabel = 'type: bug';
+                } else if (selection.includes('feature') || selection.includes('enhancement')) {
+                  typeLabel = 'type: feature';
+                } else if (selection.includes('documentation') || selection.includes('docs')) {
+                  typeLabel = 'type: documentation';
+                } else if (selection.includes('question') || selection.includes('help')) {
+                  typeLabel = 'type: question';
+                }
+              }
+
+              // Apply labels if found
+              const labelsToAdd = [];
+              if (priorityLabel) labelsToAdd.push(priorityLabel);
+              if (typeLabel) labelsToAdd.push(typeLabel);
+
+              if (labelsToAdd.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  labels: labelsToAdd
+                });
+              }
+            }
+
+      # STEP 2: Welcome message for new issues and PRs
+      - name: Welcome new contributors
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const isPR = !!context.payload.pull_request;
+            const item = isPR ? context.payload.pull_request : context.payload.issue;
+            const itemAuthor = item.user.login;
+            const isNew = context.payload.action === 'opened';
+
+            if (isNew) {
+              const welcomeMessage = isPR ?
+                `🎉 **Thank you for your contribution!**\n\n` +
+                `Your pull request has been received and will be reviewed soon. Please make sure:\n` +
+                `✅ Code follows project conventions\n` +
+                `✅ Tests pass (if applicable)\n` +
+                `✅ Documentation is updated (if needed)\n\n` +
+                `We appreciate your contribution to the OSTORA Discord Link project! 🚀` :
+                `🎉 **Thank you for opening an issue!**\n\n` +
+                `Your issue has been received and will be reviewed soon. Please ensure:\n` +
+                `✅ Issue title is clear and descriptive\n` +
+                `✅ Issue description includes details about your environment\n` +
+                `✅ Steps to reproduce are provided (for bugs)\n\n` +
+                `We appreciate your contribution to the OSTORA Discord Link project! 🚀`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                body: welcomeMessage
+              });
+            }
