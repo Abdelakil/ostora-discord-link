@@ -47,7 +47,22 @@ The plugin creates and manages two tables for complete linking functionality:
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | **steam_id** | BIGINT | **Primary Key** - SteamID64 |
-| **discord_user_id** | BIGINT | **Primary Key** - Discord user ID |
+| **discord_user_id** | BIGINT | Discord user ID |
+| **discord_username** | VARCHAR(64) | Discord username |
+| **player_name** | VARCHAR(128) | Player name at linking |
+| **linked_at** | INT | Unix timestamp when linked |
+
+### 3. `discord_link_events` (Real-time Sync Events)
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| **id** | BIGINT | **Primary Key** - Auto increment |
+| **steam_id** | BIGINT | Player's SteamID64 |
+| **action** | VARCHAR(16) | Event type: 'link', 'unlink', 'relink' |
+| **discord_user_id** | BIGINT | Discord user ID |
+| **discord_username** | VARCHAR(64) | Discord username |
+| **permission** | VARCHAR(128) | Permission to grant/revoke |
+| **created_at** | BIGINT | Unix timestamp when event created |
+| **processed** | BOOLEAN | Whether event has been processed |
 | **player_name** | VARCHAR(64) | Player name at time of linking |
 | **discord_username** | VARCHAR(64) | Discord username at time of linking |
 | **linked_at** | INT | Unix timestamp of link creation |
@@ -58,6 +73,8 @@ The plugin creates and manages two tables for complete linking functionality:
 - `idx_link_codes_expires` - Find expired codes
 - `idx_links_steam` - Fast Steam ID lookups
 - `idx_links_discord` - Fast Discord ID lookups
+- `idx_events_processed` - Find unprocessed events
+- `idx_events_steam` - Fast event lookups by Steam ID
 
 ---
 
@@ -365,6 +382,45 @@ This plugin is designed to work with a complementary Discord bot that:
 - **Server Members Intent**: For role assignment
 - **Database Access**: Read/write access to game databases
 - **Role Hierarchy**: Bot role must be higher than assigned roles
+
+### **Real-time Event Integration**
+The bot must create events in the `discord_link_events` table for real-time permission synchronization:
+
+```python
+def create_link_event(db_name, steam_id, action, discord_user_id, discord_username, permission='ostora.chatguard.use'):
+    """Create a link event for real-time sync with game server"""
+    try:
+        conn = get_conn(db_name)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO discord_link_events (steam_id, action, discord_user_id, discord_username, permission, created_at, processed)
+            VALUES (%s, %s, %s, %s, %s, UNIX_TIMESTAMP(), FALSE)
+        """, (steam_id, action, discord_user_id, discord_username, permission))
+        conn.commit()
+        conn.close()
+        print(f"Created link event: {action} for Steam {steam_id}, Discord {discord_user_id}")
+    except Exception as e:
+        print(f"Error creating link event: {e}")
+```
+
+### **Complete Bot Example**
+See `bot-example.py` for a complete implementation with:
+- **Event Creation**: Automatic event creation for link/unlink/relink actions
+- **Real-time Sync**: 2-second permission updates to game server
+- **Error Handling**: Comprehensive error handling and logging
+- **Multi-Database Support**: Handles multiple game servers
+- **Role Management**: Automatic Discord role assignment
+
+### **Bot Setup Instructions**
+1. **Install Dependencies**: `pip install discord.py mysql-connector-python`
+2. **Environment Variables**:
+   ```bash
+   export DISCORD_TOKEN="your_bot_token"
+   export DB_USER="your_db_user"
+   export DB_PASS="your_db_password"
+   ```
+3. **Configure Settings**: Update `DB_HOST`, `LINKED_ROLE_ID`, `LOG_CHANNEL_ID`
+4. **Deploy Bot**: Run with Python 3.8+ and ensure database access
 
 ---
 
