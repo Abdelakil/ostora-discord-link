@@ -149,6 +149,13 @@ public class CommandService
                 player.SendChat(expiryMessage);
             }
 
+            // Show Discord guidance for unlinked users
+            var discordGuideMessage = localizer["link.discord_guide", prefix];
+            player.SendChat(discordGuideMessage);
+            
+            var verificationHelpMessage = localizer["link.verification_help", prefix, code];
+            player.SendChat(verificationHelpMessage);
+
             _core.Logger.LogInformation("Generated link code '{Code}' for player {PlayerName} ({SteamId}), expires: {Expiry}", 
                 code, player.Controller.PlayerName, player.SteamID, expiryInfo);
         }

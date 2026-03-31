@@ -6,6 +6,8 @@
   "link.already_linked": "{0} You are already linked to Discord: [lightgreen]{1} [default]({2})",
   "link.has_active_code": "{0} You already have an active code: [lightgreen]{1} [default](expires: [yellow]{2}[default])",
   "link.error": "{0} Error generating link code. Please try again later.",
+  "link.discord_guide": "{0} 🔗 Join our Discord: [lightblue]https://discord.gg/your-server[default]",
+  "link.verification_help": "{0} 📋 How to link: [yellow]1)[default] Join Discord [yellow]2)[default] Go to #verification channel [yellow]3)[default] Type [lightgreen]!link {1}[default] [yellow]4)[default] Follow the instructions",
   
   "unlink.success": "{0} Successfully unlinked from Discord: [lightgreen]{1} [default]({2})",
   "unlink.not_linked": "{0} You are not linked to any Discord account.",
