@@ -5,8 +5,6 @@ public class PluginConfig
     public string Command { get; set; } = "!link";
     public string UnlinkCommand { get; set; } = "!unlink";
     public int CodeLength { get; set; } = 8;
-    public string MessagePrefix { get; set; } = "[OSTORA]";
-    public string CodeMessage { get; set; } = "Your link code is: {0}";
     public DatabaseSettings Database { get; set; } = new();
     public CodeSettings CodeSettings { get; set; } = new();
     public PermissionSettings Permissions { get; set; } = new();

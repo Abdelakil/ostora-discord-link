@@ -32,8 +32,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
         Core.Logger.LogInformation("Raw config values - Database.Connection: '{DbConnection}', CodeSettings.ExpiryMinutes: {ExpiryMinutes}", 
             config.Database.Connection, config.CodeSettings.ExpiryMinutes);
         
-        Core.Logger.LogInformation("Full config dump - Command: '{Command}', UnlinkCommand: '{UnlinkCommand}', CodeLength: {CodeLength}, Prefix: '{Prefix}', DB: '{DB}', Expiry: {Expiry}, Purge: {PurgeDays}, GrantOnLink: {GrantOnLink}, RevokeOnUnlink: {RevokeOnUnlink}, Permission: '{Permission}'", 
-            config.Command, config.UnlinkCommand, config.CodeLength, config.MessagePrefix, config.Database.Connection, config.CodeSettings.ExpiryMinutes, config.Database.PurgeDays, config.Permissions.GrantOnLink, config.Permissions.RevokeOnUnlink, config.Permissions.LinkedPermission);
+        Core.Logger.LogInformation("Full config dump - Command: '{Command}', UnlinkCommand: '{UnlinkCommand}', CodeLength: {CodeLength}, DB: '{DB}', Expiry: {Expiry}, Purge: {PurgeDays}, GrantOnLink: {GrantOnLink}, RevokeOnUnlink: {RevokeOnUnlink}, Permission: '{Permission}'", 
+            config.Command, config.UnlinkCommand, config.CodeLength, config.Database.Connection, config.CodeSettings.ExpiryMinutes, config.Database.PurgeDays, config.Permissions.GrantOnLink, config.Permissions.RevokeOnUnlink, config.Permissions.LinkedPermission);
         
         DatabaseService = new DatabaseService(
             Core, 

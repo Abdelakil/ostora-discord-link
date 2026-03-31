@@ -3,8 +3,6 @@
     "Command": "!link",
     "UnlinkCommand": "!unlink",
     "CodeLength": 4,
-    "MessagePrefix": "[OSTORAAAA]",
-    "CodeMessage": "Your link code is: {0}",
     "Database": {
       "Connection": "host",
       "PurgeDays": 30

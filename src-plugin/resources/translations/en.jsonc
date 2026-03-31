@@ -1,0 +1,41 @@
+{
+  "prefix": "[gold][ [purple]OSTORA [gold]]",
+
+  "link.success": "{0} Your link code is: [lightgreen]{1}",
+  "link.expiry": "{0} This code expires in: [yellow]{1}",
+  "link.already_linked": "{0} You are already linked to Discord: [lightgreen]{1} [default]({2})",
+  "link.has_active_code": "{0} You already have an active code: [lightgreen]{1} [default](expires: [yellow]{2}[default])",
+  "link.error": "{0} Error generating link code. Please try again later.",
+  
+  "unlink.success": "{0} Successfully unlinked from Discord: [lightgreen]{1} [default]({2})",
+  "unlink.not_linked": "{0} You are not linked to any Discord account.",
+  "unlink.error": "{0} Error unlinking account. Please try again later.",
+  
+  "database.unavailable": "{0} Database is not available. Please contact an administrator.",
+  "command.error": "{0} Error processing request. Please try again.",
+  
+  "permission.check.title": "{0} Permission Check:",
+  "permission.check.steamid": "{0}   SteamID: [lightblue]{1}",
+  "permission.check.permission": "{0}   Permission: '[lightblue]{1}[default]'",
+  "permission.check.has_permission": "{0}   Has Permission: {1}",
+  "permission.check.db_linked": "{0}   Database Link: ✅ Linked to [lightgreen]{1} [default]({2})",
+  "permission.check.db_not_linked": "{0}   Database Link: ❌ Not linked",
+  
+  "debug.title": "{0} Debug Link Status:",
+  "debug.db_service_enabled": "{0}   DB Service Enabled: [lightgreen]{1}[default]",
+  "debug.grant_on_link": "{0}   Grant On Link: [lightgreen]{1}[default]",
+  
+  "grant.success": "{0} Manually granted permission '[lightblue]{1}[default]'",
+  "grant.verification": "{0} Permission verification: {1}",
+  
+  "sync.start": "{0} Syncing permissions for Discord link...",
+  "sync.link_found": "{0}   Database Link: ✅ [lightgreen]{1} [default]({2})",
+  "sync.permission_granted": "{0}   Permission '[lightblue]{1}[default]' granted successfully!",
+  "sync.permission_failed": "{0}   ❌ Failed to grant permission!",
+  "sync.no_link": "{0}   ❌ No Discord link found in database!",
+  "sync.can_chat": "{0} 🎉 You can now use chat!",
+  
+  "check.title": "{0} Link Status Check:",
+  "check.missing_permission": "{0}   ⚠️  You're linked but missing permission! Type [yellow]!syncperm[default]",
+  "check.get_link": "{0}   💡 Type [yellow]!link[default] to get your link code"
+}
